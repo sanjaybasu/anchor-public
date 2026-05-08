@@ -4,7 +4,6 @@
 # bare_prompt.txt), with the addition of the clinical-safety system prompt
 # below operationalizing the deployment-equivalent stack used at major
 # U.S. health systems (refs 8-11 of the manuscript).
-# Reference: manuscript Supplementary Appendix S19.3.
 #
 # C2 additionally invokes a binary hazard-classifier pre-screen
 # (single-shot, threshold 0.5) and a PubMed retrieval-augmentation marker

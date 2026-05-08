@@ -2,7 +2,6 @@
 #
 # The C1 condition uses no system prompt. The case text is submitted as the
 # user message, prefixed with the structured-response directive below.
-# Reference: manuscript Supplementary Appendix S19.2.
 
 You are a board-certified physician. Review this case and provide:
 1. Triage level (Emergent / Urgent / Semi-urgent / Routine)
