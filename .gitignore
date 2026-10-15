@@ -1,0 +1,14 @@
+# Never commit data, outputs, or secrets
+*.jsonl
+*.csv
+*.bak
+*.log
+.env
+*.env
+results_aih_r1/
+records_*
+judgments_*
+batchstate_*
+__pycache__/
+.venv/
+.DS_Store

@@ -17,10 +17,14 @@ This repository contains the analytic and evaluation utilities sufficient for an
 
 | Component | Reason |
 |---|---|
-| Verification-layer rule library, specialist-agent prompts, concept-decomposition template, production source code | Proprietary; not released |
+| Verification-layer rule library and production source code | Proprietary; not released (the specialist-agent and fact-extraction prompts are reproduced in Note S8 of the paper) |
 | Patient-level data | Protected health information; not released |
 | Per-case raw model responses and judge adjudications | Confidential; available to journal-editor-designated reviewers under NDA on request |
 | Aggregate result tables, figures, manuscript, supplement, checklists | Withheld pending submission outcome |
+
+## Revision 1 evaluation pipeline
+
+The folder `aih_revision_r1/` holds the code, case identifiers, and commission probes for the evaluation reported in the revised manuscript, with its own README.
 
 ## Setup
 
