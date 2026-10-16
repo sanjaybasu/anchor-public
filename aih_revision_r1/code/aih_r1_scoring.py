@@ -103,7 +103,8 @@ def _neutral(text: str) -> str:
               volumes={"/results": results_vol},
               secrets=[modal.Secret.from_name("openai"), modal.Secret.from_name("anthropic"),
                        modal.Secret.from_name("google")])
-def run_scoring(task: str, records: str, suffix: str, judge: str, workers: int = 24) -> dict:
+def run_scoring(task: str, records: str, suffix: str, judge: str, workers: int = 24,
+                claude_sync: bool = False) -> dict:
     import json, os, re, time, threading
     from pathlib import Path
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -286,6 +287,34 @@ def run_scoring(task: str, records: str, suffix: str, judge: str, workers: int =
         with ThreadPoolExecutor(max_workers=workers) as ex:
             list(as_completed([ex.submit(one, j) for j in jobs]))
 
+    elif judge.startswith("claude") and claude_sync:
+        # Synchronous Messages API: same prompt parts, effort, and output limit as the batch path.
+        import anthropic
+        client = anthropic.Anthropic()
+
+        def one_c(job):
+            key, pre, suf, n = job
+            for attempt in range(5):
+                try:
+                    msg = client.messages.create(
+                        model=judge, max_tokens=8000, output_config={"effort": "low"},
+                        messages=[{"role": "user", "content": [
+                            {"type": "text", "text": pre, "cache_control": {"type": "ephemeral"}},
+                            {"type": "text", "text": suf}]}])
+                    text = "".join(getattr(bl, "text", "") or "" for bl in msg.content
+                                   if getattr(bl, "type", "") == "text")
+                    emit(key, text, {"stop_reason": msg.stop_reason, "via": "sync",
+                                     "usage": msg.usage.model_dump() if msg.usage else None}, n)
+                    return
+                except Exception as e:
+                    if attempt == 4:
+                        emit(key, "", None, n, f"{type(e).__name__}: {str(e)[:300]}")
+                        return
+                    time.sleep([5, 20, 60, 120][attempt])
+
+        with ThreadPoolExecutor(max_workers=min(workers, 12)) as ex:
+            list(as_completed([ex.submit(one_c, j) for j in jobs]))
+
     elif judge.startswith("claude"):
         import anthropic
         from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
@@ -395,11 +424,13 @@ def run_scoring(task: str, records: str, suffix: str, judge: str, workers: int =
 
 
 @app.local_entrypoint()
-def score(task: str = "checklist", records: str = "", suffix: str = "", judges: str = "", workers: int = 24):
+def score(task: str = "checklist", records: str = "", suffix: str = "", judges: str = "", workers: int = 24,
+          claude_sync: bool = False):
     use = [j.strip() for j in (judges or ",".join(JUDGES)).split(",") if j.strip()]
     if task in ("components", "findings"):
         use = [JUDGES[0]]
     sfx = suffix or records.replace("records_", "").replace(".jsonl", "")
     for judge in use:
-        fc = run_scoring.spawn(task=task, records=records, suffix=sfx, judge=judge, workers=workers)
+        fc = run_scoring.spawn(task=task, records=records, suffix=sfx, judge=judge, workers=workers,
+                               claude_sync=claude_sync)
         print(f"[aih_r1_scoring] spawned {task} {records} judge={judge}: {fc.object_id}")

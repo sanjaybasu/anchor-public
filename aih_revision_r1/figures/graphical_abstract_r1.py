@@ -57,7 +57,7 @@ def bars(rect, labels, values, colors, unit="%"):
     xs = range(len(values))
     ax.bar(xs, values, color=colors, width=0.62)
     for x, v in zip(xs, values):
-        ax.text(x, v + max(values) * 0.04, f"{v:.0f}{unit}", ha="center", va="bottom", fontsize=14,
+        ax.text(x, v + max(values) * 0.04, f"{v:.1f}{unit}", ha="center", va="bottom", fontsize=14,
                 fontweight="bold")
     ax.set_xticks(list(xs))
     ax.set_xticklabels(labels, fontsize=12.5)
@@ -85,9 +85,9 @@ bg.text(4.225, 0.85, "required actions omitted", ha="center", va="center", fonts
 arrow(5.5, 5.9, 2.6)
 
 panel(5.95, 0.45, 2.45, 4.25, ORANGE, "Findings appended")
-bg.text(7.175, 3.55, f"{catch:.0f}%", ha="center", va="center", fontsize=40, fontweight="bold", color=ORANGE)
+bg.text(7.175, 3.55, f"{catch:.1f}%", ha="center", va="center", fontsize=40, fontweight="bold", color=ORANGE)
 bg.text(7.175, 2.85, "of omitted actions\nraised by the findings", ha="center", va="center", fontsize=14)
-bg.text(7.175, 1.75, f"{fpr:.0f}%", ha="center", va="center", fontsize=30, fontweight="bold", color=GREY)
+bg.text(7.175, 1.75, f"{fpr:.1f}%", ha="center", va="center", fontsize=30, fontweight="bold", color=GREY)
 bg.text(7.175, 1.15, "of complete responses\nflagged anyway", ha="center", va="center", fontsize=13)
 arrow(8.45, 8.85, 2.6)
 

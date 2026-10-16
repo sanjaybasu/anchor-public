@@ -48,10 +48,10 @@ CLASS_STYLE = {
 PD_ORDER = ("pd_full", "pd_no_safety", "pd_no_filter", "pd_no_grounding", "pd_no_hazard")
 PD_LABEL = {
     "pd_full": "All four\ndirectives",
-    "pd_no_safety": "Without\nclinical-safety\ndirective",
-    "pd_no_filter": "Without\nprescribing-advice\ndirective",
-    "pd_no_grounding": "Without\nevidence-grounding\ndirective",
-    "pd_no_hazard": "Without\nhazard-screen\ndirective",
+    "pd_no_safety": "Without\nclinical-\nsafety",
+    "pd_no_filter": "Without\nprescribing-\nadvice",
+    "pd_no_grounding": "Without\nevidence-\ngrounding",
+    "pd_no_hazard": "Without\nhazard-\nscreen",
 }
 
 

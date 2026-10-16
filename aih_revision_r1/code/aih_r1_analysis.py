@@ -289,6 +289,9 @@ def analyze_c1c(prefix: str, cases: dict, exclude_self: bool = False) -> dict:
                 "guard_omitted_high": [i for i in high if not g[i]],
                 "caught_high": [i for i in high if not g[i] and fnd[i]],
                 "flags": findings_flag_count(recs[(cid, "append", 0)]),
+                "lnn_flags": sum(1 for m in ((recs[(cid, "append", 0)].get("framework_meta") or {}).get("modifications_applied") or [])
+                                 if str(m).startswith(("omission_fix:", "contraindication:", "anchoring:", "triage_override:"))),
+                "in_scope": (recs[(cid, "append", 0)].get("framework_meta") or {}).get("scope_in_clinical_encounter") is not False,
                 "findings_words": words((recs[(cid, "append", 0)].get("findings") or "").replace("[[RESPONSE]]", "")),
                 "words": {a: words(recs[(cid, a, 0)].get("text")) for a in ("bare", "guard", "guard_alt", "rewrite")},
                 "categories": {a: [(items[i].get("category"), int(bool(v[i]))) for i in high]
@@ -318,6 +321,7 @@ def analyze_c1c(prefix: str, cases: dict, exclude_self: bool = False) -> dict:
                     comp_rows.append({"model": mk, "lnn": (lv[i] if lv else None), "agents": (av[i] if av else None)})
 
     res["n_case_runs"] = len(rows)
+    res["_rows_by_model"] = {mk: [r for r in rows if r["model"] == mk] for mk, _ in MODELS}
     res["n_cases"] = len({r["case_id"] for r in rows})
     res["n_by_model"] = Counter(r["model"] for r in rows)
 
@@ -360,6 +364,10 @@ def analyze_c1c(prefix: str, cases: dict, exclude_self: bool = False) -> dict:
         fp = sum(1 for r in complete if r["flags"] > 0)
         p, lo, hi = wilson(fp, len(complete))
         out["fpr"] = {"k": fp, "n": len(complete), "p": p, "ci": [lo, hi]}
+        ins = [r for r in sel if r["in_scope"]]
+        k_l = sum(1 for r in ins if r["lnn_flags"] > 0)
+        p_l, lo_l, hi_l = wilson(k_l, len(ins))
+        out["lnn_finding_rate"] = {"k": k_l, "n": len(ins), "p": p_l, "ci": [lo_l, hi_l]}
         out["flags_per_run"] = quantiles([r["flags"] for r in sel])
         out["findings_words"] = quantiles([r["findings_words"] for r in sel])
         out["response_words"] = {a: quantiles([r["words"][a] for r in sel]) for a in ("bare", "guard", "guard_alt", "rewrite")}
@@ -383,6 +391,8 @@ def analyze_c1c(prefix: str, cases: dict, exclude_self: bool = False) -> dict:
     res["finish_counts"] = {k: dict(v) for k, v in finish_counts.items()}
     res["judge_fleiss_kappa_items"] = fleiss_kappa(judge_rows)
     res["judge_n_item_decisions"] = len(judge_rows)
+    un = sum(1 for r in judge_rows if max(r) == sum(r))
+    res["judge_unanimous_items"] = {"k": un, "n": len(judge_rows), "p": (un / len(judge_rows)) if judge_rows else None}
 
     # determinism summary
     if det_rows:
@@ -490,6 +500,8 @@ def analyze_commission(prefix: str, cohort: str, arms: list[str], probes: dict, 
         out["per_model"][mk] = {"arms": {a: comm(sm, a) for a in arms}, "contrasts": contr(sm)}
     out["judge_fleiss_kappa"] = fleiss_kappa(judge_rows)
     out["judge_n_decisions"] = len(judge_rows)
+    un = sum(1 for r in judge_rows if max(r) == sum(r))
+    out["judge_unanimous"] = {"k": un, "n": len(judge_rows), "p": (un / len(judge_rows)) if judge_rows else None}
     return out
 
 
@@ -528,6 +540,7 @@ def cohort_flow() -> dict:
         "c1c_high_median": per_case[len(per_case) // 2] if len(per_case) % 2 else
                            (per_case[len(per_case) // 2 - 1] + per_case[len(per_case) // 2]) / 2,
         "c1c_high_by_category": cat,
+        "c1c_high_monitoring_disposition": cat.get("monitoring", 0) + cat.get("disposition", 0),
         "c1c_sources": Counter(c.get("source") for c in json.load(open(DATA / "cohort1c_cases.json"))),
     }
 
@@ -603,6 +616,29 @@ def run_summary(prefix: str) -> dict:
     return {"run_start": ts[0][:10] if ts else None, "run_end": ts[-1][:10] if ts else None, "compute": comp}
 
 
+BOILERPLATE = ("initial logic", "parameters are validated", "standard processing applied",
+               "standard diagnostic processing", "atomic conclusion")
+
+
+def posthoc_boilerplate(prefix: str, rows_by_model: dict) -> dict:
+    """Post hoc, descriptive: status phrases that replace clinical content in rewritten responses."""
+    out = {}
+    for mk, _ in MODELS:
+        recs = load_records(prefix, "c1c", mk)
+        has = lambda t: any(b in (t or "").lower() for b in BOILERPLATE)
+        fnd = [cid for (cid, a, rep), r in recs.items() if a == "append" and rep == 0 and has(r.get("findings"))]
+        rw = [cid for (cid, a, rep), r in recs.items() if a == "rewrite" and rep == 0 and has(r.get("text"))]
+        rows = rows_by_model.get(mk, [])
+        with_p = [r["omit"]["rewrite"] for r in rows if r["case_id"] in set(rw)]
+        without = [r["omit"]["rewrite"] for r in rows if r["case_id"] not in set(rw)]
+        out[mk] = {"findings_with_phrase": len(fnd), "rewrites_with_phrase": len(rw),
+                   "n_runs": len(rows),
+                   "rewrite_omit_with_phrase": (sum(with_p) / len(with_p)) if with_p else None,
+                   "rewrite_omit_without_phrase": (sum(without) / len(without)) if without else None,
+                   "guard_omit_same_cases": (sum(r["omit"]["guard"] for r in rows if r["case_id"] in set(rw)) / len(with_p)) if with_p else None}
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--prefix", default="")
@@ -617,6 +653,7 @@ def main():
     out["runs"] = run_summary(args.prefix)
     out["c1c"] = analyze_c1c(args.prefix, cases)
     out["c1c_findings"] = finding_level(args.prefix, cases)
+    out["posthoc_boilerplate"] = posthoc_boilerplate(args.prefix, out["c1c"].pop("_rows_by_model"))
     out["c2"] = analyze_commission(args.prefix, "c2", ARMS_C2, probes2, {
         "guard_vs_bare": ("guard", "bare"), "append_vs_guard": ("append", "guard"),
         "rewrite_vs_guard": ("rewrite", "guard"), "rewrite_vs_append": ("rewrite", "append")})

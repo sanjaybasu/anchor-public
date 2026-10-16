@@ -109,7 +109,7 @@ def _system_for(arm: str) -> str:
               volumes={"/results": results_vol},
               secrets=[modal.Secret.from_name("openai"), modal.Secret.from_name("anthropic"),
                        modal.Secret.from_name("google")])
-def run_requests(cohort: str, mk: str, stage: str, arms: str = "") -> dict:
+def run_requests(cohort: str, mk: str, stage: str, arms: str = "", claude_sync: bool = False) -> dict:
     """stage = 'subjects' (arms listed) or 'rewrite'."""
     import json, os, time, threading
     from datetime import datetime
@@ -204,6 +204,33 @@ def run_requests(cohort: str, mk: str, stage: str, arms: str = "") -> dict:
             list(as_completed([ex.submit(one, r) for r in reqs]))
 
     # ── Claude Opus 5.5: Message Batches ─────────────────────────────────
+    elif mk == "claude55" and claude_sync:
+        # Synchronous Messages API: same system text, user message, and output limit as the batch path.
+        import anthropic
+        client = anthropic.Anthropic()
+
+        def one_c(req):
+            for attempt in range(5):
+                try:
+                    with client.messages.stream(model=model, max_tokens=MAX_TOKENS,
+                                                system=req["system"] or "You are a clinical AI assistant.",
+                                                messages=[{"role": "user", "content": req["user"]}]) as st:
+                        msg = st.get_final_message()
+                    text = "".join(getattr(bl, "text", "") or "" for bl in msg.content
+                                   if getattr(bl, "type", "") == "text")
+                    fin = {"provider": "anthropic", "stop_reason": msg.stop_reason,
+                           "usage": msg.usage.model_dump() if msg.usage else None}
+                    emit(req, True, text, fin, "sync")
+                    return
+                except Exception as e:
+                    if attempt == 4:
+                        emit(req, False, "", None, "sync", f"{type(e).__name__}: {str(e)[:300]}")
+                        return
+                    time.sleep([5, 20, 60, 120][attempt])
+
+        with ThreadPoolExecutor(max_workers=12) as ex:
+            list(as_completed([ex.submit(one_c, r) for r in reqs]))
+
     elif mk == "claude55":
         import anthropic
         from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
@@ -339,7 +366,7 @@ def subjects(cohort: str = "c1c", models: str = "gpt6,gemini31,claude55", arms: 
 
 
 @app.local_entrypoint()
-def rewrites(cohort: str = "c1c", models: str = "gpt6,gemini31,claude55"):
+def rewrites(cohort: str = "c1c", models: str = "gpt6,gemini31,claude55", claude_sync: bool = False):
     for mk in [m.strip() for m in models.split(",") if m.strip()]:
-        fc = run_requests.spawn(cohort=cohort, mk=mk, stage="rewrite")
+        fc = run_requests.spawn(cohort=cohort, mk=mk, stage="rewrite", claude_sync=claude_sync)
         print(f"[aih_r1_batch] spawned rewrites {cohort}/{mk}: {fc.object_id}")

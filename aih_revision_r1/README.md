@@ -12,6 +12,7 @@ Code for the evaluation reported in "Impact of a neurosymbolic verification laye
 | 4. Scoring | `code/aih_r1_scoring.py` | Three LLM judges (one per developer) score checklist items (omission) and commission; a single judge lists and matches individual findings. |
 | 5. Analysis | `code/aih_r1_analysis.py` | Computes every reported quantity from the per-case records and judgments and writes one results file. |
 | Recovery | `code/aih_r1_harvest.py` | Collects completed results from a duplicate Anthropic batch for request keys that have no result yet. |
+| Table 2 quotes | `code/aih_r1_table2_quotes.py` | Quotes, verbatim, the passage of each Table 2 text that addresses the item; the table keeps a quote only if it appears verbatim. |
 
 Batch identifiers and request maps are written to the results volume before a job waits on a batch, so a restarted container reattaches to the same batch instead of submitting it again.
 
@@ -25,6 +26,10 @@ Batch identifiers and request maps are written to the results volume before a jo
 ## Not released
 
 Per-case model responses, verification findings, and judge outputs; case text; the verification-framework source and clinical-rule library. These are available to journal-designated reviewers on reasonable request.
+
+## Results
+
+`CANONICAL_NUMBERS_R1.json` holds every reported quantity (aggregate counts, proportions, means, and confidence intervals; no case text and no per-case outputs). It is written by `code/aih_r1_analysis.py`, and the manuscript, supplement, tables, and figures read their values from it.
 
 ## Figures
 

@@ -66,6 +66,7 @@ for i, pdk in enumerate(PD_ORDER):
           filled=False)
 ax_b.set_xticks(range(len(PD_ORDER)))
 ax_b.set_xticklabels([PD_LABEL[p] for p in PD_ORDER])
+ax_b.set_xlabel("Directive removed from the guardrail prompt")
 ax_b.set_xlim(-0.55, len(PD_ORDER) - 0.45)
 ax_b.set_ylim(bottom=-1.5)
 ax_b.set_ylabel("Probe-runs with commission (%)")
