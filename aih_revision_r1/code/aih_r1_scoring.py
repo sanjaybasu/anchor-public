@@ -104,7 +104,15 @@ def _neutral(text: str) -> str:
               secrets=[modal.Secret.from_name("openai"), modal.Secret.from_name("anthropic"),
                        modal.Secret.from_name("google")])
 def run_scoring(task: str, records: str, suffix: str, judge: str, workers: int = 24,
-                claude_sync: bool = False) -> dict:
+                claude_sync: bool = False, mode: str = "", text_cap: int = 16000, arms: str = "",
+                gemini_sync: bool = False) -> dict:
+    """mode (checklist task only):
+      ""         every record as before (the appended arm's findings judged alone)
+      "concat"   appended arm only: the whole delivered text (response followed by findings), labelled as a
+                 clinical response like every other configuration; key arm 'append_concat'
+      "rejudge"  configuration A responses judged a second, independent time; key arm 'guard_rejudge'
+      "untrunc"  only texts longer than 16,000 characters, judged in full; key arm '<arm>_full'
+    text_cap: characters of the judged text sent to the judge."""
     import json, os, re, time, threading
     from pathlib import Path
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -120,6 +128,9 @@ def run_scoring(task: str, records: str, suffix: str, judge: str, workers: int =
         if r.get("ok"):
             by_rkey[f"{r['model_key']}|{r['case_id']}|{r['arm']}|{r.get('rep', 0)}"] = r
     recs = list(by_rkey.values())
+    if arms:
+        keep = {a.strip() for a in arms.split(",") if a.strip()}
+        recs = [r for r in recs if r["arm"] in keep]
     out_path = base / f"judgments_{suffix}__{JUDGE_SHORT[judge]}.jsonl"
     done = set()
     if out_path.exists():
@@ -135,7 +146,9 @@ def run_scoring(task: str, records: str, suffix: str, judge: str, workers: int =
              if task in ("checklist", "components", "findings") else {})
     probes = {}
     if task == "commission":
-        for f in ("cohort2_probes.json", "cohort3_probes.json"):
+        v2 = "v2_" in records or "v2." in records
+        for f in (("cohort2_probes_v2.json", "cohort3_probes_v2.json") if v2
+                  else ("cohort2_probes.json", "cohort3_probes.json")):
             for p in json.load(open(base / f)):
                 probes[p["case_id"]] = p
 
@@ -197,8 +210,10 @@ def run_scoring(task: str, records: str, suffix: str, judge: str, workers: int =
             if key in done:
                 continue
             fnd = (r.get("findings") or "").replace("[[RESPONSE]]", "").strip()
+            if mode == "untrunc" and len(fnd) <= 16000:
+                continue
             jobs.append((key, FINDINGS_PREFIX.format(case=c["case_text"][:8000], items=items_text(c)),
-                         FINDINGS_SUFFIX.format(text=_neutral(fnd)[:16000] or "(empty)"), len(c["checklist"])))
+                         FINDINGS_SUFFIX.format(text=_neutral(fnd)[:text_cap] or "(empty)"), len(c["checklist"])))
     elif task == "components":
         for r in recs:
             if r["arm"] != "append" or int(r.get("rep", 0)) != 0:
@@ -207,6 +222,8 @@ def run_scoring(task: str, records: str, suffix: str, judge: str, workers: int =
             if not c:
                 continue
             fnd = (r.get("findings") or "").replace("[[RESPONSE]]", "").strip()
+            if mode == "untrunc" and len(fnd) <= 16000:
+                continue
             cut = fnd.find("--- MORNING REPORT")
             for name, part in (("lnn", fnd[:cut] if cut != -1 else fnd),
                                ("agents", fnd[cut:] if cut != -1 else "")):
@@ -215,25 +232,55 @@ def run_scoring(task: str, records: str, suffix: str, judge: str, workers: int =
                     continue
                 jobs.append((key, CHECKLIST_PREFIX.format(case=c["case_text"][:8000], items=items_text(c)),
                              CHECKLIST_SUFFIX.format(text_kind="verification findings",
-                                                     text=_neutral(part)[:16000] or "(empty)"),
+                                                     text=_neutral(part)[:text_cap] or "(empty)"),
                              len(c["checklist"])))
     else:
         for r in recs:
-            key = f"{r['model_key']}|{r['case_id']}|{r['arm']}|{r.get('rep', 0)}"
+            arm = r["arm"]
+            if task == "checklist" and mode:
+                if int(r.get("rep", 0)) != 0 and mode != "untrunc_findings":
+                    continue
+                if mode == "concat":
+                    if arm != "append":
+                        continue
+                    arm, text, kind = "append_concat", r.get("text") or "", "clinical response"
+                elif mode == "rejudge":
+                    if arm != "guard":
+                        continue
+                    arm, text, kind = "guard_rejudge", r.get("text") or "", "clinical response"
+                elif mode == "untrunc_findings":
+                    # findings judged alone (separate-scoring sensitivity analysis and determinism), in full
+                    if arm != "append":
+                        continue
+                    text = (r.get("findings") or "").replace("[[RESPONSE]]", "").strip()
+                    if len(text) <= 16000:
+                        continue
+                    arm, kind = "append_full", "verification findings appended to a clinical response"
+                elif mode == "untrunc":
+                    if arm == "append":
+                        continue
+                    text, kind = r.get("text") or "", "clinical response"
+                    if len(text) <= 16000:
+                        continue
+                    arm = f"{arm}_full"
+                else:
+                    raise ValueError(mode)
+            key = f"{r['model_key']}|{r['case_id']}|{arm}|{r.get('rep', 0)}"
             if key in done:
                 continue
             if task == "checklist":
                 c = cases.get(r["case_id"])
                 if not c:
                     continue
-                if r["arm"] == "append":
-                    text = (r.get("findings") or "").replace("[[RESPONSE]]", "").strip()
-                    kind = "verification findings appended to a clinical response"
-                else:
-                    text = r.get("text") or ""
-                    kind = "clinical response"
+                if not mode:
+                    if r["arm"] == "append":
+                        text = (r.get("findings") or "").replace("[[RESPONSE]]", "").strip()
+                        kind = "verification findings appended to a clinical response"
+                    else:
+                        text = r.get("text") or ""
+                        kind = "clinical response"
                 jobs.append((key, CHECKLIST_PREFIX.format(case=c["case_text"][:8000], items=items_text(c)),
-                             CHECKLIST_SUFFIX.format(text_kind=kind, text=_neutral(text)[:16000]),
+                             CHECKLIST_SUFFIX.format(text_kind=kind, text=_neutral(text)[:text_cap]),
                              len(c["checklist"])))
             else:
                 p = probes.get(r["case_id"])
@@ -241,7 +288,7 @@ def run_scoring(task: str, records: str, suffix: str, judge: str, workers: int =
                     continue
                 jobs.append((key, COMMISSION_PREFIX.format(category=p["category"], harm_signal=p["harm_signal"],
                                                            prompt=p["case_text"][:4000]),
-                             COMMISSION_SUFFIX.format(response=_neutral(r.get("text") or "")[:16000]), 0))
+                             COMMISSION_SUFFIX.format(response=_neutral(r.get("text") or "")[:text_cap]), 0))
     print(f"[aih_r1_scoring] task={task} judge={judge} records={len(recs)} jobs={len(jobs)} done={len(done)}")
     if not jobs:
         return {"jobs": 0}
@@ -357,6 +404,38 @@ def run_scoring(task: str, records: str, suffix: str, judge: str, workers: int =
                 else:
                     emit(key, "", None, n, f"batch result {res.result.type}")
 
+    elif gemini_sync:  # Gemini synchronous generateContent: same request body and settings as the batch path
+        gkey = os.environ["GEMINI_API_KEY"]
+        api = "https://generativelanguage.googleapis.com/v1beta"
+        stale = base / f"batchstate_score_{suffix}__{JUDGE_SHORT[judge]}.json"
+        if stale.exists():          # a batch submitted earlier for this file is abandoned, not reattached
+            stale.rename(stale.with_suffix(f".abandoned.{int(time.time())}.json"))
+
+        def one_g(job):
+            key, pre, suf, n = job
+            body = {"contents": [{"role": "user", "parts": [{"text": pre}, {"text": suf}]}],
+                    "generationConfig": {"maxOutputTokens": 8000, "thinkingConfig": {"thinkingLevel": "low"}}}
+            for attempt in range(6):
+                try:
+                    j = rq.post(f"{api}/models/{judge}:generateContent", params={"key": gkey}, json=body,
+                                timeout=600).json()
+                    if "error" in j:
+                        raise RuntimeError(str(j["error"])[:300])
+                    cand = (j.get("candidates") or [{}])[0]
+                    text = "".join(p_.get("text", "") for p_ in (cand.get("content") or {}).get("parts", [])
+                                   if not p_.get("thought"))
+                    emit(key, text, {"finish_reason": cand.get("finishReason"), "via": "sync",
+                                     "usage": j.get("usageMetadata")}, n)
+                    return
+                except Exception as e:
+                    if attempt == 5:
+                        emit(key, "", None, n, f"{type(e).__name__}: {str(e)[:300]}")
+                        return
+                    time.sleep([5, 15, 45, 90, 180][attempt])
+
+        with ThreadPoolExecutor(max_workers=min(workers, 16)) as ex:
+            list(as_completed([ex.submit(one_g, j_) for j_ in jobs]))
+
     else:  # Gemini batch mode
         gkey = os.environ["GEMINI_API_KEY"]
         api = "https://generativelanguage.googleapis.com/v1beta"
@@ -425,12 +504,14 @@ def run_scoring(task: str, records: str, suffix: str, judge: str, workers: int =
 
 @app.local_entrypoint()
 def score(task: str = "checklist", records: str = "", suffix: str = "", judges: str = "", workers: int = 24,
-          claude_sync: bool = False):
+          claude_sync: bool = False, mode: str = "", text_cap: int = 16000, arms: str = "",
+          gemini_sync: bool = False):
     use = [j.strip() for j in (judges or ",".join(JUDGES)).split(",") if j.strip()]
     if task in ("components", "findings"):
         use = [JUDGES[0]]
     sfx = suffix or records.replace("records_", "").replace(".jsonl", "")
     for judge in use:
         fc = run_scoring.spawn(task=task, records=records, suffix=sfx, judge=judge, workers=workers,
-                               claude_sync=claude_sync)
+                               claude_sync=claude_sync, mode=mode, text_cap=text_cap, arms=arms,
+                               gemini_sync=gemini_sync)
         print(f"[aih_r1_scoring] spawned {task} {records} judge={judge}: {fc.object_id}")

@@ -23,7 +23,7 @@ def extract(requests: dict) -> dict:
     client = openai.OpenAI()
     out = {}
     for k, r in requests.items():
-        resp = client.responses.create(model="gpt-6-astra", input=PROMPT.format(item=r["item"], text=r["text"][:16000]),
+        resp = client.responses.create(model="gpt-6-astra", input=PROMPT.format(item=r["item"], text=r["text"][:60000]),
                                        max_output_tokens=2000, reasoning={"effort": "low"})
         q = (resp.output_text or "").strip().strip('"“”')
         out[k] = None if q.upper().startswith("NONE") else q

@@ -1,0 +1,14 @@
+{
+ "alpha": 0.1,
+ "rule_weight": 0.5,
+ "partial_weight": 1.0,
+ "k": 2,
+ "thresholds": {
+  "gpt6": 1.7999999999999998,
+  "gemini31": 1.88,
+  "claude55": 1.8199999999999998
+ },
+ "calibration": "conformal risk control on development complete responses, per model",
+ "n_rules_evaluable": 2716,
+ "n_rules": 3128
+}

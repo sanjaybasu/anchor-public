@@ -19,10 +19,12 @@ MODEL_STYLE = {
 
 ARM_LABEL = {
     "bare": "Bare",
-    "guard": "Configuration A",
-    "guard_alt": "Configuration B",
+    "guard": "Config-\nuration A",
+    "guard_grounded": "A with\nsearch",
+    "guard_alt": "Config-\nuration B",
     "append": "Appended",
     "rewrite": "Rewrite",
+    "regen": "Regener-\nation",
 }
 ARM_STYLE = {
     "bare": dict(color="#555555", marker="o", ms=6.5),

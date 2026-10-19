@@ -1,9 +1,8 @@
-"""Graphical abstract (AIH): design flow and pooled results.
+"""Graphical abstract (AIH): design, omission and commission by delivered version, and alert burden.
 
-Reads CANONICAL_NUMBERS_R1.json; no value is typed into this script. Arial only, no product names
-or logos, short labels only. Distinct from Figures 1-3: pooled bars rather than per-model estimates.
-Writes graphical_abstract_r1.png at 3,300 x 1,680 pixels (11.0 x 5.6 in at 300 dpi; the AIH
-minimum is 1,100 x 560 pixels).
+Reads CANONICAL_NUMBERS_R1.json; no value is typed into this script. Arial only, no product names or logos.
+Distinct from Figures 1-3: pooled estimates on one axis rather than per-model estimates. Writes
+graphical_abstract_r1.png at 3,300 x 1,680 pixels (11.0 x 5.6 in at 300 dpi; the AIH minimum is 1,100 x 560).
 
 Run: python graphical_abstract_r1.py [path/to/CANONICAL_NUMBERS_R1.json]
 """
@@ -15,7 +14,7 @@ import matplotlib as mpl
 
 mpl.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
-from matplotlib.patches import FancyArrowPatch, FancyBboxPatch  # noqa: E402
+from matplotlib.patches import FancyBboxPatch  # noqa: E402
 
 from r1_style import CANON  # noqa: E402
 
@@ -24,13 +23,16 @@ src = Path(sys.argv[1]) if len(sys.argv) > 1 else CANON
 canon = json.load(open(src))
 mpl.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"]})
 
-pool = canon["c1c"]["pooled"]
-om = {a: 100 * pool["arms"][a]["omit_mean"] for a in ("bare", "guard", "append", "rewrite")}
-catch = 100 * pool["catch"]["p"]
-fpr = 100 * pool["fpr"]["p"]
-c2 = canon["c2"]["arms"]
-cm = {a: 100 * c2[a]["p"] for a in ("bare", "guard", "append", "rewrite")}
+v2 = canon["v2"]
+pool = v2["pooled"]
+c2 = canon["c2"]
 n_cases = canon["cohort_flow"]["c1c_n"]
+ROWS = (("guard", "First response", "#555555"),
+        ("regen", "Self-revision", "#009E73"),
+        ("v2_rewrite", "Revision with alerts", "#0072B2"),
+        ("rewrite", "Revision with findings", "#D55E00"),
+        ("v2_append", "Response and alerts", "#0072B2"),
+        ("append", "Response and findings", "#D55E00"))
 
 W, H = 11.0, 5.6
 fig = plt.figure(figsize=(W, H))
@@ -38,62 +40,74 @@ bg = fig.add_axes([0, 0, 1, 1])
 bg.set_xlim(0, W)
 bg.set_ylim(0, H)
 bg.axis("off")
-GREY, PURPLE, ORANGE, SKY, GREEN = "#555555", "#CC79A7", "#E69F00", "#56B4E9", "#009E73"
 
 
 def panel(x, y, w, h, color, title):
     bg.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0,rounding_size=0.12", linewidth=2,
                                 edgecolor=color, facecolor="white"))
-    bg.text(x + w / 2, y + h - 0.22, title, ha="center", va="top", fontsize=17, fontweight="bold")
+    bg.text(x + w / 2, y + h - 0.2, title, ha="center", va="top", fontsize=16, fontweight="bold")
 
 
-def arrow(x0, x1, y):
-    bg.add_patch(FancyArrowPatch((x0, y), (x1, y), arrowstyle="-|>", mutation_scale=22, linewidth=2.5,
-                                 color=GREY))
+# Left: design
+panel(0.2, 0.25, 2.3, 5.1, "#555555", "Study")
+lines = [(f"{n_cases}", "clinical cases", 28), (f"{c2['n_probes']}", "commission probes", 28),
+         ("3", "frontier LLMs", 28), ("6", "versions of each response", 28)]
+y = 4.45
+for big, small, fs in lines:
+    bg.text(1.35, y, big, ha="center", va="center", fontsize=fs, fontweight="bold", color="#333333")
+    bg.text(1.35, y - 0.4, small, ha="center", va="center", fontsize=12.5)
+    y -= 0.98
+bg.text(1.35, 0.68, "Feedback: none, full findings,\nor calibrated alerts;\nappended or used to revise", ha="center",
+        va="center", fontsize=10.5, color="#333333", linespacing=1.3)
+
+# Middle: omission and commission by version, one row per version
+panel(2.7, 0.25, 5.85, 5.1, "#0072B2", "Omission and commission by version")
 
 
-def bars(rect, labels, values, colors, unit="%"):
-    ax = fig.add_axes(rect)
-    xs = range(len(values))
-    ax.bar(xs, values, color=colors, width=0.62)
-    for x, v in zip(xs, values):
-        ax.text(x, v + max(values) * 0.04, f"{v:.1f}{unit}", ha="center", va="bottom", fontsize=14,
-                fontweight="bold")
-    ax.set_xticks(list(xs))
-    ax.set_xticklabels(labels, fontsize=12.5)
-    ax.set_ylim(0, max(values) * 1.32 if max(values) > 0 else 1)
-    ax.set_yticks([])
-    for sp in ("top", "right", "left"):
-        ax.spines[sp].set_visible(False)
-    return ax
+def dots(ax, block, key, lo_key, hi_key, labels):
+    vals = []
+    for i, (a, lab, col) in enumerate(ROWS):
+        v = block["arms"].get(a)
+        if not v or v.get(key) is None:
+            continue
+        m, lo, hi = 100 * v[key], 100 * v[lo_key][0], 100 * v[lo_key][1]
+        vals.append(hi)
+        ax.errorbar([m], [i], xerr=[[m - lo], [hi - m]], fmt="o", ms=9, color=col, elinewidth=2.0, capsize=3.5)
+        ax.text(hi + 0.3, i, f"{m:.1f}", va="center", fontsize=12, color=col, fontweight="bold")
+    ax.set_yticks(range(len(ROWS)))
+    ax.set_yticklabels([lab for _, lab, _ in ROWS] if labels else [], fontsize=12)
+    if not labels:
+        ax.tick_params(axis="y", length=0)
+    ax.set_ylim(len(ROWS) - 0.5, -0.5)
+    ax.set_xlim(0, max(vals) * 1.4 if vals else 15)
+    ax.tick_params(axis="x", labelsize=11)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.grid(axis="x", color="#e5e5e5", linewidth=1)
+    ax.axhline(3.5, color="#bbbbbb", linewidth=1)
 
 
-bg.text(W / 2, H - 0.25, "Where verification findings act, and what the clinician receives", ha="center",
-        va="top", fontsize=21, fontweight="bold")
+ax_o = fig.add_axes([0.418, 0.215, 0.13, 0.585])
+dots(ax_o, pool, "omit_mean", "omit_ci", None, labels=True)
+ax_o.set_title("Required actions\nomitted (%)", fontsize=12.5, fontweight="bold", pad=8)
+ax_c = fig.add_axes([0.593, 0.215, 0.13, 0.585])
+dots(ax_c, c2, "p", "ci", None, labels=False)
+ax_c.set_title("Probe-runs with\ncommission (%)", fontsize=12.5, fontweight="bold", pad=8)
+bg.text(5.625, 0.55, f"Means with 95% CIs: {v2['n_test_cases']} held-out cases; {c2['n_probe_runs']} probe-runs.\n"
+        "Feedback did not lower omission below self-revision;\nthe full findings lowered commission.",
+        ha="center", va="center", fontsize=10.5, color="#444444", linespacing=1.2)
 
-panel(0.25, 0.45, 2.25, 4.25, GREY, "Same cases")
-bg.text(1.375, 3.65, f"{n_cases}", ha="center", va="center", fontsize=40, fontweight="bold", color=GREY)
-bg.text(1.375, 3.0, "clinical cases", ha="center", va="center", fontsize=15)
-bg.text(1.375, 2.2, "3", ha="center", va="center", fontsize=40, fontweight="bold", color=GREY)
-bg.text(1.375, 1.55, "frontier LLMs", ha="center", va="center", fontsize=15)
-bg.text(1.375, 0.95, "120 commission probes", ha="center", va="center", fontsize=13)
-arrow(2.55, 2.95, 2.6)
-
-panel(3.0, 0.45, 2.45, 4.25, PURPLE, "Guardrail prompt")
-bars([0.300, 0.27, 0.19, 0.37], ["Bare", "Guardrail"], [om["bare"], om["guard"]], [GREY, PURPLE])
-bg.text(4.225, 0.85, "required actions omitted", ha="center", va="center", fontsize=13)
-arrow(5.5, 5.9, 2.6)
-
-panel(5.95, 0.45, 2.45, 4.25, ORANGE, "Findings appended")
-bg.text(7.175, 3.55, f"{catch:.1f}%", ha="center", va="center", fontsize=40, fontweight="bold", color=ORANGE)
-bg.text(7.175, 2.85, "of omitted actions\nraised by the findings", ha="center", va="center", fontsize=14)
-bg.text(7.175, 1.75, f"{fpr:.1f}%", ha="center", va="center", fontsize=30, fontweight="bold", color=GREY)
-bg.text(7.175, 1.15, "of complete responses\nflagged anyway", ha="center", va="center", fontsize=13)
-arrow(8.45, 8.85, 2.6)
-
-panel(8.9, 0.45, 1.85, 4.25, SKY, "Rewrite")
-bars([0.833, 0.27, 0.135, 0.37], ["Append", "Rewrite"], [om["append"], om["rewrite"]], [ORANGE, SKY])
-bg.text(9.825, 0.85, "required actions\nomitted", ha="center", va="center", fontsize=13)
+# Right: alert burden
+panel(8.75, 0.25, 2.05, 5.1, "#E69F00", "Alert burden")
+bg.text(9.775, 4.45, "Complete\nresponses flagged", ha="center", va="center", fontsize=12, fontweight="bold",
+        linespacing=1.15)
+bg.text(9.775, 3.7, f"{100 * pool['v1_false_alert_rate']['p']:.0f}%", ha="center", va="center", fontsize=26,
+        fontweight="bold", color="#D55E00")
+bg.text(9.775, 3.25, "full findings", ha="center", va="center", fontsize=11.5)
+bg.text(9.775, 2.65, f"{100 * pool['false_alert_rate']['p']:.1f}%", ha="center", va="center", fontsize=26,
+        fontweight="bold", color="#0072B2")
+bg.text(9.775, 2.2, "calibrated alerts", ha="center", va="center", fontsize=11.5)
+bg.text(9.775, 1.15, f"Words added:\n{pool['v1_words'][0]:,.0f} versus {pool['alert_words_per_alerted'][0]:,.0f}",
+        ha="center", va="center", fontsize=11.5, linespacing=1.25, color="#333333")
 
 fig.savefig(OUT / "graphical_abstract_r1.png", dpi=300)
-print(f"wrote {OUT / 'graphical_abstract_r1.png'} ({int(W * 300)} x {int(H * 300)} px) from {src}")
+print(f"wrote {OUT / 'graphical_abstract_r1.png'} from {src}")
